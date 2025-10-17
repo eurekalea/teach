@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>高階 vs 低階：教學用程式語言轉換器</title>
+  <!-- Tailwind (CDN) for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM + Babel (so we can write JSX directly) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-50">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useMemo, useState } = React;
+
+    // ========================= 小工具 =========================
+    const pad = (n, bits) => n.toString(2).padStart(bits, "0");
+    const toBin16 = (op, r, imm) => pad(op, 4) + pad(r, 4) + pad(((imm % 256) + 256) % 256, 8);
+    const isNumber = (s) => /^[-+]?\\d+$/.test(s.trim());
+
+    function AddressAllocator() {
+      const map = new Map();
+      let next = 1;
+      return {
+        addr(name) { if (!map.has(name)) map.set(name, next++); return map.get(name); },
+        entries() { return Array.from(map.entries()); }
+      };
+    }
+
+    function lexLines(py) {
+      const raw = py.replace(/\\r\\n?/g, "\\n").split("\\n");
+      return raw.map((line) => {
+        const m = line.match(/^(\\s*)(.*)$/);
+        const indent = m ? m[1].replace(/\\t/g, "    ").length : 0;
+        const code = (m ? m[2] : "").split("#")[0].trim();
+        return { indent, code, raw: line };
+      });
+    }
+
+    function parse(py) {
+      const lines = lexLines(py).filter((l) => l.code.length > 0);
+      let i = 0;
+
+      function parseExpr(tok) {
+        const parts = tok.split(/([+-])/).map((s) => s.trim()).filter(Boolean);
+        if (parts.length === 1) {
+          const t = parts[0];
+          if (isNumber(t)) return { kind: 'num', value: parseInt(t, 10) };
+          return { kind: 'var', name: t };
+        }
+        if (parts.length === 3) {
+          const [a, op, b] = parts;
+          const left = isNumber(a) ? { kind:'num', value:parseInt(a,10) } : { kind:'var', name:a };
+          const right = isNumber(b) ? { kind:'num', value:parseInt(b,10) } : { kind:'var', name:b };
+          if (op !== "+" && op !== "-") throw new Error("僅支援 + 或 - 運算");
+          return { kind: 'bin', op, left, right };
+        }
+        throw new Error("目前僅支援『單一運算子』的加減式，例如 a + 1、b - a、x、3。");
+      }
+
+      function parseBlock(baseIndent) {
+        const stmts = [];
+        while (i < lines.length) {
+          const { indent, code } = lines[i];
+          if (indent < baseIndent) break;
+          if (indent > baseIndent) throw new Error(\`縮排錯誤：第 \${i + 1} 行\`);
+
+          let m = code.match(/^(\\w+)\\s*=\\s*(.+)$/);
+          if (m) {
+            const name = m[1];
+            const expr = parseExpr(m[2]);
+            stmts.push({ kind: 'assign', name, expr });
+            i++; continue;
+          }
+
+          m = code.match(/^print\\((.+)\\)$/);
+          if (m) {
+            stmts.push({ kind: 'print', expr: parseExpr(m[1]) });
+            i++; continue;
+          }
+
+          m = code.match(/^while\\s+(\\w+)\\s*<\\s*(\\d+)\\s*:\\s*$/);
+          if (m) {
+            const varName = m[1];
+            const bound = parseInt(m[2], 10);
+            i++;
+            if (i >= lines.length || lines[i].indent <= indent) {
+              throw new Error(\`while 之後需要縮排區塊：第 \${i + 1} 行\`);
+            }
+            const body = parseBlock(indent + 4);
+            stmts.push({ kind: 'while', varName, bound, body });
+            continue;
+          }
+
+          throw new Error(\`不支援的語句：第 \${i + 1} 行 → \${code}\`);
+        }
+        return stmts;
+      }
+
+      return parseBlock(0);
+    }
+
+    function emitC(ast) {
+      const lines = [
+        '#include <stdio.h>',
+        'int main() {'
+      ];
+      function exprToC(e) {
+        if (e.kind === 'num') return String(e.value);
+        if (e.kind === 'var') return e.name;
+        if (e.kind === 'bin') return \`\${exprToC(e.left)} \${e.op} \${exprToC(e.right)}\`;
+      }
+      function stmt(s, indent = '  ') {
+        if (s.kind === 'assign') return \`\${indent}\${s.name} = \${exprToC(s.expr)};\`;
+        if (s.kind === 'print') return \`\${indent}printf("%d\\n", \${exprToC(s.expr)});\`;
+        if (s.kind === 'while') {
+          const head = \`\${indent}while (\${s.varName} < \${s.bound}) {\`;
+          const body = s.body.map((b) => stmt(b, indent + '  ')).join("\\n");
+          const tail = \`\${indent}}\`;
+          return [head, body, tail].join("\\n");
+        }
+      }
+      const vars = new Set();
+      (function collect(stmts){
+        for (const s of stmts) {
+          if (s.kind === 'assign') {
+            if (s.expr.kind === 'var') vars.add(s.expr.name);
+            if (s.expr.kind === 'bin') {
+              if (s.expr.left.kind === 'var') vars.add(s.expr.left.name);
+              if (s.expr.right.kind === 'var') vars.add(s.expr.right.name);
+            }
+            vars.add(s.name);
+          } else if (s.kind === 'print') {
+            if (s.expr.kind === 'var') vars.add(s.expr.name);
+          } else if (s.kind === 'while') {
+            vars.add(s.varName);
+            collect(s.body);
+          }
+        }
+      })(ast);
+      if (vars.size) lines.splice(1, 0, \`int \${Array.from(vars).join(', ')};\`);
+      for (const s of ast) lines.push(stmt(s));
+      lines.push('  return 0;'); lines.push('}');
+      return lines.join("\\n");
+    }
+
+    function emitAsm(ast) {
+      const AA = AddressAllocator();
+      const asm = [];
+      let labelId = 0;
+
+      function LI(r, imm) {
+        asm.push({ op:'LOAD', r, imm:0, text:\`LOAD  R\${r}, [0]\` });
+        if (imm !== 0) asm.push({ op:'ADDI', r, imm, text:\`ADDI  R\${r}, \${imm}\` });
+      }
+      function loadVarTo(r, name) {
+        const addr = AA.addr(name);
+        asm.push({ op:'LOAD', r, imm:addr, text:\`LOAD  R\${r}, [\${addr}] ; \${name}\` });
+        return addr;
+      }
+      function storeVarFrom(r, name) {
+        const addr = AA.addr(name);
+        asm.push({ op:'STORE', r, imm:addr, text:\`STORE R\${r}, [\${addr}] ; \${name}\` });
+        return addr;
+      }
+      function emitExprToR1(e) {
+        if (e.kind === 'num') {
+          LI(1, e.value);
+        } else if (e.kind === 'var') {
+          loadVarTo(1, e.name);
+        } else if (e.kind === 'bin') {
+          if (e.left.kind === 'num') LI(1, e.left.value); else loadVarTo(1, e.left.name);
+          if (e.right.kind === 'num') LI(2, e.right.value); else loadVarTo(2, e.right.name);
+          if (e.op === '+') {
+            asm.push({ op:'ADD', r:1, imm:2, text:'ADD   R1, R2' });
+          } else if (e.op === '-') {
+            throw new Error('目前減法僅支援 a - 常數。您可以把「a - b」改寫為「a + (-b)」後再指定常數。');
+          }
+        }
+      }
+      function emitStmt(s) {
+        if (s.kind === 'assign') {
+          if (s.expr.kind === 'bin' && s.expr.op === '-' && s.expr.right.kind === 'var') {
+            throw new Error('a - b 目前不支援（Toy ISA 精簡版）。請改為 a = a + K 或 a = a - K（K 為常數）。');
+          }
+          if (s.expr.kind === 'bin' && s.expr.op === '-' && s.expr.right.kind === 'num') {
+            if (s.expr.left.kind === 'var') {
+              loadVarTo(1, s.expr.left.name);
+              asm.push({ op:'SUBI', r:1, imm:s.expr.right.value, text:\`SUBI  R1, \${s.expr.right.value}\`});
+              storeVarFrom(1, s.name);
+              return;
+            } else if (s.expr.left.kind === 'num') {
+              LI(1, s.expr.left.value - s.expr.right.value);
+              storeVarFrom(1, s.name);
+              return;
+            }
+          }
+          emitExprToR1(s.expr);
+          storeVarFrom(1, s.name);
+          return;
+        }
+        if (s.kind === 'print') {
+          if (s.expr.kind === 'num') {
+            const tmp = \`__const_\${s.expr.value}\`;
+            LI(1, s.expr.value);
+            storeVarFrom(1, tmp);
+            const addr = AA.addr(tmp);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print \${s.expr.value}\`});
+            return;
+          } else if (s.expr.kind === 'var') {
+            const addr = AA.addr(s.expr.name);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print \${s.expr.name}\`});
+            return;
+          } else {
+            emitExprToR1(s.expr);
+            const tmp = \`__tmp_print\`;
+            storeVarFrom(1, tmp);
+            const addr = AA.addr(tmp);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print expr\`});
+            return;
+          }
+        }
+        if (s.kind === 'while') {
+          const Ltop = \`L\${labelId++}\`;
+          const Lend = \`L\${labelId++}\`;
+          asm.push({ label: Ltop, text: \`\${Ltop}:\` });
+          loadVarTo(1, s.varName);
+          LI(2, s.bound);
+          asm.push({ op:'CMP', r:1, imm:2, text:'CMP   R1, R2' });
+          asm.push({ op:'JLT', r:0, imm:Ltop + "_BODY", text:\`JLT   \${Ltop}_BODY\` });
+          asm.push({ op:'JMP', r:0, imm:Lend, text:\`JMP   \${Lend}\` });
+          asm.push({ label: Ltop + "_BODY", text: \`\${Ltop}_BODY:\` });
+          s.body.forEach(emitStmt);
+          asm.push({ op:'JMP', r:0, imm:Ltop, text:\`JMP   \${Ltop}\` });
+          asm.push({ label: Lend, text: \`\${Lend}:\` });
+          return;
+        }
+      }
+      ast.forEach(emitStmt);
+      asm.push({ op:'HALT', r:0, imm:0, text:'HALT' });
+
+      const withAddr = [];
+      const labelToPc = new Map();
+      let pc = 0;
+      for (const ins of asm) {
+        if (ins.label) { labelToPc.set(ins.label, pc); }
+        else { withAddr.push({ ...ins, pc }); pc++; }
+      }
+      const finalized = withAddr.map((ins) => {
+        if (typeof ins.imm === 'string') {
+          if (!labelToPc.has(ins.imm)) throw new Error(\`未定義標籤：\${ins.imm}\`);
+          return { ...ins, imm: labelToPc.get(ins.imm) };
+        }
+        return ins;
+      });
+      return { asm: finalized, memMap: AddressAllocator().entries ? [] : [], memMap: (function(){return AddressAllocator();})() };
+    }
+
+    // 修正：上面快速複製造成 memMap 失效，改為直接回傳 AA.entries()
+    // 重新覆寫 emitAsm，以保持簡潔
+  </script>
+
+  <script type="text/babel">
+    // ---- 重新定義 emitAsm（覆蓋前面不小心破壞的版本） ----
+    function emitAsm(ast) {
+      const AA = (function AddressAllocator() {
+        const map = new Map(); let next = 1;
+        return {
+          addr(name) { if (!map.has(name)) map.set(name, next++); return map.get(name); },
+          entries() { return Array.from(map.entries()); }
+        };
+      })();
+      const asm = []; let labelId = 0;
+
+      function LI(r, imm) {
+        asm.push({ op:'LOAD', r, imm:0, text:\`LOAD  R\${r}, [0]\` });
+        if (imm !== 0) asm.push({ op:'ADDI', r, imm, text:\`ADDI  R\${r}, \${imm}\` });
+      }
+      function loadVarTo(r, name) {
+        const addr = AA.addr(name);
+        asm.push({ op:'LOAD', r, imm:addr, text:\`LOAD  R\${r}, [\${addr}] ; \${name}\` });
+        return addr;
+      }
+      function storeVarFrom(r, name) {
+        const addr = AA.addr(name);
+        asm.push({ op:'STORE', r, imm:addr, text:\`STORE R\${r}, [\${addr}] ; \${name}\` });
+        return addr;
+      }
+      function emitExprToR1(e) {
+        if (e.kind === 'num') LI(1, e.value);
+        else if (e.kind === 'var') loadVarTo(1, e.name);
+        else if (e.kind === 'bin') {
+          if (e.left.kind === 'num') LI(1, e.left.value); else loadVarTo(1, e.left.name);
+          if (e.right.kind === 'num') LI(2, e.right.value); else loadVarTo(2, e.right.name);
+          if (e.op === '+') asm.push({ op:'ADD', r:1, imm:2, text:'ADD   R1, R2' });
+          else if (e.op === '-') throw new Error('目前減法僅支援 a - 常數。');
+        }
+      }
+      function emitStmt(s) {
+        if (s.kind === 'assign') {
+          if (s.expr.kind === 'bin' && s.expr.op === '-' && s.expr.right.kind === 'var') {
+            throw new Error('a - b 目前不支援（Toy ISA 精簡版）。');
+          }
+          if (s.expr.kind === 'bin' && s.expr.op === '-' && s.expr.right.kind === 'num') {
+            if (s.expr.left.kind === 'var') {
+              loadVarTo(1, s.expr.left.name);
+              asm.push({ op:'SUBI', r:1, imm:s.expr.right.value, text:\`SUBI  R1, \${s.expr.right.value}\`});
+              storeVarFrom(1, s.name); return;
+            } else if (s.expr.left.kind === 'num') {
+              LI(1, s.expr.left.value - s.expr.right.value);
+              storeVarFrom(1, s.name); return;
+            }
+          }
+          emitExprToR1(s.expr); storeVarFrom(1, s.name); return;
+        }
+        if (s.kind === 'print') {
+          if (s.expr.kind === 'num') {
+            const tmp = \`__const_\${s.expr.value}\`;
+            LI(1, s.expr.value); storeVarFrom(1, tmp);
+            const addr = AA.addr(tmp);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print \${s.expr.value}\`}); return;
+          } else if (s.expr.kind === 'var') {
+            const addr = AA.addr(s.expr.name);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print \${s.expr.name}\`}); return;
+          } else {
+            emitExprToR1(s.expr); const tmp = '__tmp_print'; storeVarFrom(1, tmp);
+            const addr = AA.addr(tmp);
+            asm.push({ op:'OUT', r:0, imm:addr, text:\`OUT   [\${addr}] ; print expr\`}); return;
+          }
+        }
+        if (s.kind === 'while') {
+          const Ltop = \`L\${labelId++}\`; const Lend = \`L\${labelId++}\`;
+          asm.push({ label: Ltop, text: \`\${Ltop}:\` });
+          loadVarTo(1, s.varName); LI(2, s.bound);
+          asm.push({ op:'CMP', r:1, imm:2, text:'CMP   R1, R2' });
+          asm.push({ op:'JLT', r:0, imm:Ltop + "_BODY", text:\`JLT   \${Ltop}_BODY\` });
+          asm.push({ op:'JMP', r:0, imm:Lend, text:\`JMP   \${Lend}\` });
+          asm.push({ label: Ltop + "_BODY", text: \`\${Ltop}_BODY:\` });
+          s.body.forEach(emitStmt);
+          asm.push({ op:'JMP', r:0, imm:Ltop, text:\`JMP   \${Ltop}\` });
+          asm.push({ label: Lend, text: \`\${Lend}:\` }); return;
+        }
+      }
+
+      ast.forEach(emitStmt);
+      asm.push({ op:'HALT', r:0, imm:0, text:'HALT' });
+
+      const withAddr = []; const labelToPc = new Map(); let pc = 0;
+      for (const ins of asm) {
+        if (ins.label) { labelToPc.set(ins.label, pc); }
+        else { withAddr.push({ ...ins, pc }); pc++; }
+      }
+      const finalized = withAddr.map((ins) => {
+        if (typeof ins.imm === 'string') {
+          if (!labelToPc.has(ins.imm)) throw new Error(\`未定義標籤：\${ins.imm}\`);
+          return { ...ins, imm: labelToPc.get(ins.imm) };
+        }
+        return ins;
+      });
+      return { asm: finalized, memMap: AA.entries() };
+    }
+
+    function asmToMachine(asm) {
+      const OPC = { NOP:0x0, LOAD:0x1, STORE:0x2, ADDI:0x3, SUBI:0x4, ADD:0x5, CMP:0x6, JLT:0x7, JMP:0x8, OUT:0x9, HALT:0xF };
+      const regOr0 = (x) => (typeof x === 'number' ? x : 0);
+      return asm.map((ins) => {
+        if (!ins.op) return null;
+        const op = OPC[ins.op]; const r = regOr0(ins.r);
+        const imm = typeof ins.imm === 'number' ? ins.imm : 0;
+        const bin = toBin16(op, r, imm);
+        return { pc: ins.pc, text: ins.text, bin };
+      }).filter(Boolean);
+    }
+
+    function runMachine(code) {
+      const mem = new Uint16Array(256);
+      const pcToInstr = new Map(code.map((c) => [c.pc, c]));
+      const R = new Uint16Array(8);
+      let PC = 0; let LT = false, EQ = false, GT = false; const out = [];
+      const read8 = (x) => x & 0xFF;
+
+      for (let steps = 0; steps < 10000; steps++) {
+        const instr = pcToInstr.get(PC); if (!instr) break;
+        const bin = instr.bin;
+        const op = parseInt(bin.slice(0,4), 2);
+        const r  = parseInt(bin.slice(4,8), 2);
+        const imm = parseInt(bin.slice(8,16), 2);
+
+        PC++;
+        switch (op) {
+          case 0x0: break;
+          case 0x1: R[r] = mem[read8(imm)]; break;
+          case 0x2: mem[read8(imm)] = R[r]; break;
+          case 0x3: R[r] = (R[r] + read8(imm)) & 0xFFFF; break;
+          case 0x4: R[r] = (R[r] - read8(imm)) & 0xFFFF; break;
+          case 0x5: { const r2 = imm & 0xF; R[r] = (R[r] + R[r2]) & 0xFFFF; break; }
+          case 0x6: { const r2 = imm & 0xF; LT = R[r] < R[r2]; EQ = R[r] === R[r2]; GT = R[r] > R[r2]; break; }
+          case 0x7: if (LT) { PC = read8(imm); } break;
+          case 0x8: PC = read8(imm); break;
+          case 0x9: out.push(mem[read8(imm)]); break;
+          case 0xF: return { out, mem, R, PC };
+          default: throw new Error(\`未知指令：\${op}\`);
+        }
+      }
+      return { out, mem, R, PC };
+    }
+
+    function App() {
+      const [py, setPy] = useState(\`x = 0
+while x < 5:
+    print(x)
+    x = x + 1\`);
+      const [cOut, setCOut] = useState("");
+      const [asmOut, setAsmOut] = useState("");
+      const [binOut, setBinOut] = useState("");
+      const [runOut, setRunOut] = useState("");
+      const [error, setError] = useState("");
+
+      const templates = useMemo(() => ([
+        {
+          name: '遞增列印',
+          svg: (
+            <svg viewBox="0 0 640 360" className="w-full h-36">
+              <rect x="0" y="0" width="640" height="360" rx="24" className="fill-slate-100" />
+              <text x="24" y="48" className="fill-slate-700" fontSize="34">範本：遞增列印</text>
+              <circle cx="60" cy="100" r="16" className="fill-slate-400"/>
+              <text x="90" y="108" fontSize="26" className="fill-slate-700">初始化 x = 0（執行：把 x 設為 0）</text>
+              <circle cx="60" cy="160" r="16" className="fill-slate-400"/>
+              <text x="90" y="168" fontSize="26" className="fill-slate-700">while x &lt; 5: print(x); x = x + 1（執行：每輪先輸出 x，再把 x 加 1）</text>
+            </svg>
+          ),
+          code: \`x = 0
+while x < 5:
+    print(x)
+    x = x + 1\`
+        },
+        {
+          name: '累加總和',
+          svg: (
+            <svg viewBox="0 0 640 360" className="w-full h-36">
+              <rect x="0" y="0" width="640" height="360" rx="24" className="fill-slate-100" />
+              <text x="24" y="48" className="fill-slate-700" fontSize="34">範本：累加總和</text>
+              <circle cx="60" cy="100" r="16" className="fill-slate-400"/>
+              <text x="90" y="108" fontSize="26" className="fill-slate-700">s = 0, i = 1（執行：初始化總和與計數）</text>
+              <circle cx="60" cy="160" r="16" className="fill-slate-400"/>
+              <text x="90" y="168" fontSize="26" className="fill-slate-700">while i &lt; 6: s = s + i; i = i + 1（執行：每輪把 i 累加到 s，i 再加 1）</text>
+            </svg>
+          ),
+          code: \`s = 0
+i = 1
+while i < 6:
+    s = s + i
+    i = i + 1
+print(s)\`
+        },
+        {
+          name: '差值倒數（展示減法-常數）',
+          svg: (
+            <svg viewBox="0 0 640 360" className="w-full h-36">
+              <rect x="0" y="0" width="640" height="360" rx="24" className="fill-slate-100" />
+              <text x="24" y="48" className="fill-slate-700" fontSize="34">範本：倒數</text>
+              <circle cx="60" cy="100" r="16" className="fill-slate-400"/>
+              <text x="90" y="108" fontSize="26" className="fill-slate-700">n = 5（執行：將 n 設為 5）</text>
+              <circle cx="60" cy="160" r="16" className="fill-slate-400"/>
+              <text x="90" y="168" fontSize="26" className="fill-slate-700">while n &lt; 100: print(n); n = n - 1（執行：輸出 n 後減 1；此範例展示減法常數）</text>
+            </svg>
+          ),
+          code: \`n = 5
+print(n)
+n = n - 1
+print(n)\`
+        }
+      ]), []);
+
+      function onConvert() {
+        try {
+          setError("");
+          const ast = parse(py);
+          const c = emitC(ast);
+          const { asm, memMap } = emitAsm(ast);
+          const bin = asmToMachine(asm);
+          const run = runMachine(bin);
+
+          setCOut(c);
+
+          const asmText = asm.map((a) => a.op ? \`\${a.pc.toString().padStart(3,' ')}: \${a.text}\` : a.text).join("\\n");
+          const memMapText = memMap.map(([name, addr]) => \`\${name} → [\${addr}]\`).join("\\n");
+          setAsmOut(\`; 變數對應表\\n\${memMapText}\\n\\n; 程式\\n\${asmText}\`);
+
+          const binText = bin.map((b) => \`\${b.pc.toString().padStart(3,' ')}: \${b.bin}\`).join("\\n");
+          setBinOut(binText);
+
+          setRunOut(run.out.join("\\n"));
+        } catch (e) {
+          setError(e.message || String(e));
+        }
+      }
+
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white text-slate-800 p-6">
+          <div className="max-w-6xl mx-auto space-y-6">
+            <header className="flex items-center justify-between">
+              <h1 className="text-2xl md:text-3xl font-bold">🧠 高階 vs 低階：教學用程式語言轉換器</h1>
+              <button onClick={onConvert} className="px-4 py-2 rounded-2xl shadow bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] transition">開始轉換</button>
+            </header>
+
+            <section className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold">程式語言輸入視窗（Python 子集合）</h2>
+                  <span className="text-xs text-slate-500">支援：指派、print、while x &lt; 常數、加減（右項可為常數或變數；減法右側需為常數）</span>
+                </div>
+                <textarea value={py} onChange={(e)=>setPy(e.target.value)} className="w-full h-48 rounded-2xl border p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                {error && (
+                  <div className="text-red-600 text-sm bg-red-50 border border-red-100 p-3 rounded-xl">⚠️ {error}</div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="font-semibold">程式範本選擇</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {templates.map((t, idx) => (
+                    <button key={idx} onClick={()=>setPy(t.code)} className="rounded-2xl border hover:shadow transition bg-white overflow-hidden text-left">
+                      <div className="p-2">{t.svg}</div>
+                      <div className="px-3 pb-3 text-sm font-medium">{t.name}</div>
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <h3 className="font-semibold mt-2">程式執行結果（Toy VM 的 OUT）</h3>
+                  <pre className="mt-1 p-3 bg-slate-900 text-slate-50 rounded-2xl overflow-auto max-h-40">{runOut || '（尚無輸出，請按「開始轉換」）'}</pre>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid lg:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <h3 className="font-semibold">① 其它高階語言：C 語言</h3>
+                <pre className="p-3 bg-white border rounded-2xl overflow-auto text-sm leading-6"><code>{cOut}</code></pre>
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-semibold">② 低階語言：組合語言（Toy ISA）</h3>
+                <pre className="p-3 bg-white border rounded-2xl overflow-auto text-sm leading-6"><code>{asmOut}</code></pre>
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-semibold">③ 低階語言：機器語言（二進位 16-bit）</h3>
+                <pre className="p-3 bg-white border rounded-2xl overflow-auto text-sm leading-6"><code>{binOut}</code></pre>
+                <p className="text-xs text-slate-500">說明：每行為 1 筆指令，格式 [opcode(4)][reg(4)][imm/addr(8)]，皆以 0/1 表示。不使用十六進位。</p>
+              </div>
+            </section>
+
+            <footer className="text-xs text-slate-500 leading-6">
+              <p>教學提示：這套轉換器聚焦「觀念對映」而非商用編譯器功能。讓學生觀察：
+                Python（抽象、可讀性高）→ C（較貼近硬體）→ 組合語言（指令層級）→ 機器語言（二進位）。
+                你可以請學生嘗試調整 while 條件或指派，觀察組合與機器碼如何變化。</p>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
