@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>班級分組座位圖</title>
+  <style>
+    body { font-family: sans-serif; display: flex; gap: 20px; padding: 20px; }
+    .input-area, .unassigned, .group { border: 1px solid #ccc; padding: 10px; }
+    .seat, .number { border: 1px solid #000; margin: 5px; padding: 10px; text-align: center; cursor: grab; background: #f0f0f0; }
+    .group-area { display: flex; flex-wrap: wrap; gap: 20px; max-width: 800px; }
+    .group { width: 180px; }
+    .desk { width: 100%; height: 10px; background: black; margin: 10px 0; }
+    .droppable { min-height: 40px; border: 1px dashed #aaa; }
+  </style>
+</head>
+<body>
+
+  <!-- 輸入區 -->
+  <div class="input-area">
+    <h3>輸入座號</h3>
+    <textarea id="numberInput" rows="10" cols="10" placeholder="如：1,2,3 或逐行輸入"></textarea><br>
+    <button onclick="generateNumbers()">產生</button>
+  </div>
+
+  <!-- 未安排座位 -->
+  <div class="unassigned">
+    <h3>未安排</h3>
+    <div id="unassignedArea" class="droppable"></div>
+  </div>
+
+  <!-- 分組座位 -->
+  <div class="group-area" id="groupArea">
+    <!-- 會由 JS 產生各組 -->
+  </div>
+
+  <script>
+    function allowDrop(ev) {
+      ev.preventDefault();
+    }
+
+    function drag(ev) {
+      ev.dataTransfer.setData("text", ev.target.id);
+    }
+
+    function drop(ev) {
+      ev.preventDefault();
+      const data = ev.dataTransfer.getData("text");
+      const target = ev.target;
+      if (target.classList.contains("droppable") && target.children.length === 0) {
+        const draggedElement = document.getElementById(data);
+        target.appendChild(draggedElement);
+      }
+    }
+
+    function generateNumbers() {
+      const input = document.getElementById("numberInput").value;
+      const numbers = input.split(/[\n,]+/).map(n => n.trim()).filter(n => n !== "");
+      const unassignedArea = document.getElementById("unassignedArea");
+      unassignedArea.innerHTML = "";
+
+      numbers.forEach(num => {
+        const div = document.createElement("div");
+        div.className = "number";
+        div.textContent = num;
+        div.id = "num-" + num;
+        div.draggable = true;
+        div.ondragstart = drag;
+        unassignedArea.appendChild(div);
+      });
+    }
+
+    // 自動建立座位區塊
+    const groupArea = document.getElementById("groupArea");
+    for (let i = 1; i <= 8; i++) {
+      const group = document.createElement("div");
+      group.className = "group";
+      group.innerHTML = `
+        <h4>第${i}組</h4>
+        <div class="droppable" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        <div class="desk"></div>
+        <div class="droppable" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+      `;
+      groupArea.appendChild(group);
+    }
+  </script>
+
+</body>
+</html>
