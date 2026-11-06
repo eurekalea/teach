@@ -56,12 +56,43 @@ img.th{max-width:160px;max-height:100px;border:1px solid var(--line);border-radi
 .chip .x{border:0;background:none;color:var(--fail);font:inherit;cursor:pointer;padding:0 6px}
 .tot{font-weight:700;margin:8px 0}.tot .bad{color:var(--fail)}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}.bar select{width:auto}
+
+.help h2{font-size:20px;margin:0 0 8px}.help .lead{font-size:17px;margin:0 0 16px}
+.anim{--d:12s;margin:6px auto 4px;max-width:700px}
+.stage{position:relative;height:215px;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+.stage .file,.stage .engine,.stage .rcard{position:absolute;top:50%;transform:translateY(-50%);border-radius:8px;background:var(--surface);border:1px solid var(--line);font-size:14px}
+.stage .file{left:3%;padding:8px 12px;font-weight:700;color:var(--accent);animation:fileMove var(--d) infinite}
+.stage .engine{left:38%;width:24%;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;overflow:hidden;text-align:center}
+.stage .engine b{font-size:15px}.stage .engine span{font-size:12px;color:var(--muted)}
+.scan{position:absolute;left:0;right:0;top:0;height:3px;background:var(--accent);opacity:0;animation:scan var(--d) infinite}
+.stage .rcard{right:3%;width:35%;padding:8px 12px;opacity:0;animation:cardIn var(--d) infinite}
+.rcard .ln{display:flex;justify-content:space-between;gap:6px;opacity:0;font-size:13px;line-height:1.7}.rcard .ln.bad{color:var(--fail)}
+.rcard .l1{animation:r1 var(--d) infinite}.rcard .l2{animation:r2 var(--d) infinite}.rcard .l3{animation:r3 var(--d) infinite}.rcard .l4{animation:r4 var(--d) infinite}
+.rcard .tot2{margin-top:4px;padding-top:4px;border-top:1px solid var(--line);font-size:20px;font-weight:700;text-align:right;opacity:0;animation:r5 var(--d) infinite}
+.arrow{position:absolute;top:50%;transform:translateY(-50%);color:var(--muted);font-size:22px}.arrow.a1{left:31%}.arrow.a2{left:63%}
+@keyframes fileMove{0%,6%{opacity:1;left:3%}25%{opacity:1;left:30%}29%,100%{opacity:0;left:30%}}
+@keyframes scan{0%,24%{opacity:0;top:0}26%{opacity:1;top:0}50%{opacity:1;top:100%}52%,100%{opacity:0;top:100%}}
+@keyframes cardIn{0%,52%{opacity:0}58%,95%{opacity:1}100%{opacity:0}}
+@keyframes r1{0%,58%{opacity:0}62%,95%{opacity:1}100%{opacity:0}}@keyframes r2{0%,64%{opacity:0}68%,95%{opacity:1}100%{opacity:0}}
+@keyframes r3{0%,70%{opacity:0}74%,95%{opacity:1}100%{opacity:0}}@keyframes r4{0%,76%{opacity:0}80%,95%{opacity:1}100%{opacity:0}}
+@keyframes r5{0%,84%{opacity:0}88%,95%{opacity:1}100%{opacity:0}}
+.stps{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px;justify-content:center}
+.stp{font-size:13px;padding:3px 12px;border-radius:14px;border:1px solid var(--line);color:var(--muted)}
+.stp.s1{animation:st1 var(--d) infinite}.stp.s2{animation:st2 var(--d) infinite}.stp.s3{animation:st3 var(--d) infinite}.stp.s4{animation:st4 var(--d) infinite}
+@keyframes st1{0%,24%{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}25%,100%{background:none;color:var(--muted);border-color:var(--line)}}
+@keyframes st2{0%,24%{background:none;color:var(--muted);border-color:var(--line)}25%,49%{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}50%,100%{background:none;color:var(--muted);border-color:var(--line)}}
+@keyframes st3{0%,49%{background:none;color:var(--muted);border-color:var(--line)}50%,79%{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}80%,100%{background:none;color:var(--muted);border-color:var(--line)}}
+@keyframes st4{0%,79%{background:none;color:var(--muted);border-color:var(--line)}80%,95%{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}96%,100%{background:none;color:var(--muted);border-color:var(--line)}}
+.anim.pause *{animation-play-state:paused!important}
+@media (prefers-reduced-motion:reduce){.anim *{animation:none!important}.anim .rcard,.anim .rcard .ln,.anim .rcard .tot2{opacity:1!important}.anim .file,.anim .scan{display:none}.anim .stp{background:none!important}}
+.steps{margin:0;padding-left:20px}
+@media(max-width:560px){.stage{height:260px}.stage .rcard{width:46%;right:2%}.stage .engine{left:30%;width:22%;height:100px}.arrow{display:none}.rcard .ln{font-size:12px}.stage .file{font-size:12px;padding:6px 8px}}.steps li{margin:4px 0}
 </style>
 </head>
 <body>
 <header>
   <h1>Scratch 自動批改系統 <span class="tag">試用版</span></h1>
-  <div class="seg" role="group" aria-label="切換視角"><button id="rt" aria-pressed="false">教師視角</button><button id="rs" aria-pressed="true">學生視角</button></div>
+  <div class="seg" role="group" aria-label="切換畫面"><button id="rh" aria-pressed="true">試用說明</button><button id="rt" aria-pressed="false">教師視角</button><button id="rs" aria-pressed="false">學生視角</button></div>
   <button class="sm" id="reset">重設體驗</button>
 </header>
 <div class="notice">單次體驗版:所有操作只存在這個網頁裡,關閉或重新整理就會清空;你上傳的檔案不會送到任何伺服器,批改都在你的瀏覽器內完成。範例學生皆為虛構。</div>
@@ -617,7 +648,7 @@ var DEFAULT_UNITS = [
 var SEED = { s1: { u164: 85, u167: 92, u170: 78, u178: 100 }, s2: { u164: 100, u167: 70 }, s3: { u167: 55, u178: 62 }, s4: { u180: 48 },
              s5: { u164: 90, u167: 88, u170: 95, u178: 100, u180: 82, u191: 76 }, s6: { u164: 40 }, s7: { u167: 100, u178: 96, u191: 58 }, s8: {} };
 
-var UNITS = [], SCORES = {}, RB = {}, S = { role: 'student', sid: 's2', unit: null, tab: 1, busy: false, cf: '' }, NEXT = 1;
+var UNITS = [], SCORES = {}, RB = {}, S = { role: 'help', sid: 's2', unit: null, tab: 1, busy: false, cf: '' }, NEXT = 1;
 
 async function init() {
   for (var i = 0; i < DEFAULT_UNITS.length; i++) {
@@ -642,12 +673,33 @@ function avgOf(sid) {
 
 /* ---------- 版面 ---------- */
 function render() {
-  $('rt').setAttribute('aria-pressed', S.role === 'teacher'); $('rs').setAttribute('aria-pressed', S.role === 'student');
-  if (S.role === 'student') renderStudent(); else renderTeacher();
+  $('rh').setAttribute('aria-pressed', S.role === 'help'); $('rt').setAttribute('aria-pressed', S.role === 'teacher'); $('rs').setAttribute('aria-pressed', S.role === 'student');
+  if (S.role === 'help') renderHelp(); else if (S.role === 'student') renderStudent(); else renderTeacher();
 }
+$('rh').onclick = function () { S.role = 'help'; render(); };
 $('rt').onclick = function () { S.role = 'teacher'; render(); };
 $('rs').onclick = function () { S.role = 'student'; render(); };
 $('reset').onclick = function () { location.reload(); };
+
+
+/* ---------- 試用說明頁 ---------- */
+var PAUSED = false;
+function renderHelp() {
+  $('app').innerHTML = '<div class="help"><section class="panel"><h2>歡迎試用 Scratch 自動批改系統</h2>' +
+    '<p class="lead">學生上傳 Scratch 作業(.sb3),系統依老師設定的評分規準自動給分,並列出每一項得分與扣分原因。不需要 AI,也不會呼叫任何外部服務。</p>' +
+    '<div class="anim' + (PAUSED ? ' pause' : '') + '" id="anim" role="img" aria-label="流程動畫:學生上傳 sb3 檔案,系統讀取積木並對照評分規準,最後顯示分數與扣分提醒"><div class="stage">' +
+    '<div class="file">81105李小玲.sb3</div><span class="arrow a1" aria-hidden="true">→</span>' +
+    '<div class="engine"><b>自動批改</b><span>讀取積木<br>對照評分規準</span><div class="scan"></div></div><span class="arrow a2" aria-hidden="true">→</span>' +
+    '<div class="rcard"><div class="ln l1"><span>✓ 基本分(檔名正確)</span><span>30 / 30</span></div><div class="ln l2"><span>✓ 核心概念</span><span>14 / 20</span></div><div class="ln l3"><span>✓ 程式功能</span><span>42 / 50</span></div><div class="ln l4 bad"><span>✗ 缺少「碰到邊緣就反彈」</span></div><div class="tot2">86 / 100</div></div></div>' +
+    '<div class="stps"><span class="stp s1">① 命名並上傳 .sb3</span><span class="stp s2">② 系統讀取積木</span><span class="stp s3">③ 對照評分規準</span><span class="stp s4">④ 顯示分數與扣分提醒</span></div></div>' +
+    '<p style="text-align:center;margin:6px 0 0"><button class="sm" data-a="pause" aria-pressed="' + PAUSED + '">' + (PAUSED ? '播放動畫' : '暫停動畫') + '</button></p></section>' +
+    '<div class="grid"><section class="panel"><h2>想體驗「學生」</h2><ol class="steps"><li>按上方「學生視角」,選一位虛構學生。</li><li>按「下載完整版示範檔」(檔名已設好),再按「上傳並批改」,應得 100 分。</li><li>改壞檔案或把檔名改錯再上傳,看看扣分說明與不及格的紅色提示。</li></ol>' +
+    '<p style="margin:12px 0 0"><button class="go" data-a="gostudent">開始體驗學生視角</button></p></section>' +
+    '<section class="panel"><h2>想體驗「教師」</h2><ol class="steps"><li>按上方「教師視角」,在單元設定按「新增單元」。</li><li>填題目文字,上傳完整版 .sb3,按「依完整版產生建議規準」。</li><li>調整配分(核心概念 20、程式功能 50)並儲存,勾選「開放繳交」,再切到學生視角試交。</li></ol>' +
+    '<p style="margin:12px 0 0"><button class="go" data-a="goteacher">開始體驗教師視角</button></p></section></div>' +
+    '<section class="panel"><h2>分數怎麼算</h2><ul class="steps"><li><b>基本分 30:</b>檔名要寫成「年級 1 碼 + 班級 2 碼 + 座號 2 碼 + 姓名」,例如 8 年 11 班 5 號李小玲是 81105李小玲。</li><li><b>核心概念 20:</b>該單元要學會的觀念,例如角色變數、清單、分身、廣播。</li><li><b>程式功能 50:</b>程式各個部分有沒有做出來,可部分給分。</li><li>低於 60 分會用紅色醒目提示(不影響成績)。未繳交的單元以 0 分計入平均,未開放的單元不列入。</li><li>變數、清單、角色的名稱不會被要求和範例一樣。</li></ul>' +
+    '<p class="st">這是單次體驗版:所有操作只存在這個網頁,重新整理就會清空;上傳的檔案不會離開你的電腦。</p></section></div>';
+}
 
 /* ---------- 學生視角 ---------- */
 function scoreCell(sc) {
@@ -809,7 +861,10 @@ var app = $('app');
 app.addEventListener('click', function (e) {
   var t = e.target.closest('[data-a]'); if (!t) return;
   var a = t.getAttribute('data-a'), card = t.closest('.card'), id = card && card.getAttribute('data-id'), u = id && unitOf(id), it = t.closest('.it');
-  if (a === 'pick') { S.unit = t.getAttribute('data-id'); renderStudent(); }
+  if (a === 'gostudent') { S.role = 'student'; render(); }
+  else if (a === 'goteacher') { S.role = 'teacher'; render(); }
+  else if (a === 'pause') { PAUSED = !PAUSED; $('anim').classList.toggle('pause', PAUSED); t.setAttribute('aria-pressed', PAUSED); t.textContent = PAUSED ? '播放動畫' : '暫停動畫'; }
+  else if (a === 'pick') { S.unit = t.getAttribute('data-id'); renderStudent(); }
   else if (a === 'go') submit();
   else if (a === 'copy') { var tx = ScratchGrader.expectedFilename(stOf(S.sid)); if (navigator.clipboard) navigator.clipboard.writeText(tx).catch(function () {}); t.textContent = '已複製'; setTimeout(function () { t.textContent = '複製檔名'; }, 1500); }
   else if (a === 'dl') {
